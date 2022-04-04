@@ -2,30 +2,72 @@
 The bioinformatics pipeline for https://pubmed.ncbi.nlm.nih.gov/32003146/.
 Wang Y, Kapun M, Waidele L, Kuenzel S, Bergland AO, Staubach F. Common structuring principles of the Drosophila melanogaster microbiome on a continental scale and between host and substrate. Environ Microbiol Rep. 2020 Apr;12(2):220-228. doi: 10.1111/1758-2229.12826. Epub 2020 Feb 8. PMID: 32003146.
 
-# DrosEU bioinformatics pipeline
-The bioinformatics pipeline for the generation and analyses of the DrosEU data from 2014. This pipeline was created by the DrosEU consortium. Please check out our corresponding paper:
+raw data: https://www.ncbi.nlm.nih.gov/biosample?LinkName=bioproject_biosample_all&from_uid=391254
 
-Kapun, M., Barrón, M. G., Staubach, F., Obbard, D. J., Wiberg, R. A. W., Vieira, J., … González, J. (2020). Genomic Analysis of European Drosophila melanogaster Populations Reveals Longitudinal Structure, Continent-Wide Selection, and Previously Unknown DNA Viruses. Molecular Biology and Evolution, 37(9), 2661–2678. doi: [10.1093/molbev/msaa120](https://academic.oup.com/mbe/article/37/9/2661/5837682)
+## A) mothur script
+
+```mothur
+#quality assessment and preparation of sequences
+make.contigs(file=stability2.csv, processors=12)
+summary.seqs(fasta=current)
+screen.seqs(fasta=current,group=current,summary=current,maxambig=0,maxlength=253,minlength=251)
+unique.seqs(fasta=current)
+count.seqs(name=current,group=current)
+#pcr.seqs(fasta=silva.bacteria.fasta, start=11894, end=25319, keepdots=F)
+#system(mv silva.bacteria.pcr.fasta silva.v4.fasta)
+align.seqs(fasta=stability2.trim.contigs.good.unique.fasta,reference=silva.v4.fasta)
+summary.seqs(fasta=current,count=current)
+screen.seqs(fasta=current,count=current,summary=current,start=1968,end=11550,maxhomop=8)
+filter.seqs(fasta=stability2.trim.contigs.good.unique.good.align,vertical=T,trump=.)
+unique.seqs(fasta=current,count=current)
+pre.cluster(fasta=current,count=current,diffs=2)
+chimera.uchime(fasta=current,count=current,dereplicate=t)
+remove.seqs(fasta=current,accnos=current)
+summary.seqs(fasta=current,count=current)
+
+# for stack plot Figure 3
+classify.seqs(fasta=current, count=current, reference=silva.v4.fasta, taxonomy=silva.bacteria.silva.tax, cutoff=40,processors=16)
+
+#for rarefaction curves Figure 2 
+remove.lineage(fasta=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability2.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.count_table, taxonomy=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.silva.wang.taxonomy, taxon=Wolbachia-Chloroplast-Mitochondria-unknown-Archaea-Eukaryota-Halomonas))
+#remove wolbachia & Halomonas
+cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, method=average, cutoff=0.15,processors=16)
+cluster(column=current,count=current)
+make.shared(list=current, count=current, label=0.03)
+
+count.groups(shared=current)
+#subsample 967 sequences
+
+##do simulations in R to get a new count_table flie including the simulated pools
+##new count_table flie - simulated.count_table
+
+sub.sample(fasta=current, count=simulated.count_table, taxonomy=current,size=967,persample=true)
+cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, method=average, cutoff=0.15)
+cluster(column=current,count=current)
+make.shared(list=current, count=current, label=0.03)
+
+rarefaction.single(shared=current, calc=sobs, freq=1)
+summary.single(shared=current, calc=nseqs-coverage-sobs-chao-shannon-simpson-shannoneven-simpsoneven)
+
+#for pcoa plot and jitter plot and cluster analysis Figure 4, 5, and 6
+#Figure 4a, 5a, 6a, 6b we pick all individual samples and simulated pools from plum by using get.groups function
+get.groups(shared=current,fasta=current,count_table=current, groups=mel_home_plum_7_12_13-mel_home_plum_8_8_12-mel_home_plum_single10_7_12_13-mel_home_plum_single11_7_12_13-mel_home_plum_single12_7_12_13-mel_home_plum_single13_7_12_13-mel_home_plum_single14_7_12_13-mel_home_plum_single15_7_12_13-mel_home_plum_single16_7_12_13-mel_home_plum_single17_7_12_13-mel_home_plum_single18_7_12_13-mel_home_plum_single19_7_12_13-mel_home_plum_single1_7_12_13-mel_home_plum_single20_7_12_13-mel_home_plum_single21_7_12_13-mel_home_plum_single22_7_12_13-mel_home_plum_single23_7_12_13-mel_home_plum_single24_7_12_13-mel_home_plum_single25_7_12_13-mel_home_plum_single26_7_12_13-mel_home_plum_single27_7_12_13-mel_home_plum_single28_7_12_13-mel_home_plum_single29_7_12_13-mel_home_plum_single2_7_12_13-mel_home_plum_single30_7_12_13-mel_home_plum_single31_7_12_13-mel_home_plum_single32_7_12_13-mel_home_plum_single3_7_12_13-mel_home_plum_single4_7_12_13-mel_home_plum_single5_7_12_13-mel_home_plum_single7_7_12_13-mel_home_plum_single8_7_12_13-mel_home_plum_single9_7_12_13-simulated_pool1-simulated_pool2-simulated_pool3-simulated_pool4-simulated_pool5-simulated_pool6-simulated_pool7-simulated_pool8-simulated_pool9-simulated_pool10-simulated_pool11-simulated_pool12-simulated_pool13-simulated_pool14-simulated_pool15-simulated_pool16-simulated_pool17-simulated_pool18-simulated_pool19-simulated_pool20-simulated_pool21-simulated_pool22-simulated_pool23-simulated_pool24-simulated_pool25-simulated_pool26-simulated_pool27-simulated_pool28-simulated_pool29-simulated_pool30)
+dist.shared(shared=current, calc=braycurtis-jest,processors=8,label=0.03)
+pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.opti_mcc.braycurtis.0.03.lt.dist)
+pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.opti_mcc.jest.0.03.lt.dist)
+dist.seqs(fasta=current, output=lt, processors=8)
+clearcut(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.dist)
+unifrac.unweighted(tree=current, count=current, distance=lt, processors=8, random=F)
+unifrac.weighted(tree=current, count=current, distance=lt, processors=8, random=F)
+pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.tre1.unweighted.phylip.dist)
+pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.tre1.weighted.phylip.dist)
+
+#Figure 4b, 5b we do the same except picking all pool samples across substrates and simulated pools from plum also by using get.groups function
 
 
-## A) trim, map and re-align around InDels
-
-### 1) Trim raw FASTQ reads for BQ >18 and minimum length > 75bp with [cutadapt](https://cutadapt.readthedocs.io/en/stable/)
-
-```bash
-export PATH=$PATH:scripts/cutadapt-1.8.3/bin
-
-cutadapt \
--q 18 \
---minimum-length 75 \
--o trimmed-read1.fq.gz \
--p trimmed-read2.fq.gz \
--b ACACTCTTTCCCTACACGACGCTCTTCCGATC \
--B CAAGCAGAAGACGGCATACGAGAT \
--O 15 \
--n 3 \
-read1.fq.gz \
-read2.fq.gz
+##get taxonomy for each otu
+get.oturep(list=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.list,count=stability2.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.count_table,fasta=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta,method=abundance,label=0.03)
+classify.seqs(fasta=current, count=current, reference=silva.v4.fasta, taxonomy=silva.bacteria.silva.tax, cutoff=40,processors=16)
 ```
 
 ### 2) map trimmed reads with [bwa](https://sourceforge.net/projects/bio-bwa/files/) and filter for propper read pairs with MQ > 20 using [samtools](http://samtools.sourceforge.net/)
