@@ -2,7 +2,7 @@
 The bioinformatics pipeline for https://pubmed.ncbi.nlm.nih.gov/32003146/.
 Wang Y, Kapun M, Waidele L, Kuenzel S, Bergland AO, Staubach F. Common structuring principles of the Drosophila melanogaster microbiome on a continental scale and between host and substrate. Environ Microbiol Rep. 2020 Apr;12(2):220-228. doi: 10.1111/1758-2229.12826. Epub 2020 Feb 8. PMID: 32003146.
 
-raw data: https://www.ncbi.nlm.nih.gov/biosample?LinkName=bioproject_biosample_all&from_uid=391254
+raw data: https://www.ncbi.nlm.nih.gov/bioproject/?term=prjna515407
 
 ## A) mothur script
 
@@ -84,697 +84,450 @@ sub.sample(shared=start.droseu97.shared,size=5135,persample=true)
 summary.single(shared=start.droseu97.0.03.subsample.shared, calc=nseqs-coverage-sobs-chao-shannon-simpson-invsimpson-shannoneven-simpsoneven)
 ```
 
-### 2) map trimmed reads with [bwa](https://sourceforge.net/projects/bio-bwa/files/) and filter for propper read pairs with MQ > 20 using [samtools](http://samtools.sourceforge.net/)
-
-```bash
-export PATH=$PATH:scripts/samtools-0.1.19
-
-export PATH=$PATH:scripts/bwa-0.7.15
-
-bwa mem \
--M \
--t 24 \
-reference.fa.gz \
-trimmed-read1.fq.gz \
-trimmed-read2.fq.gz \
-| samtools view \
--Sbh -q 20 -F 0x100 - > library.bam
-```
-
-### 3) sort BAM by reference position using [picard](https://broadinstitute.github.io/picard/)
-
-```bash
-java \
--Xmx20g \
--Dsnappy.disable=true \
--jar scripts/picard-tools-1.109/SortSam.jar \
-I=library.bam \
-O=library-sort.bam \
-SO=coordinate \
-VALIDATION_STRINGENCY=SILENT
-```
-
-### 4) remove PCR duplicates with [picard](https://broadinstitute.github.io/picard/)
-
-```bash
-java \
--Xmx20g \
--Dsnappy.disable=true \
--jar scripts/picard-tools-1.109/MarkDuplicates.jar \
-REMOVE_DUPLICATES=true \
-I=library-sort.bam \
-O=library-dedup.bam \
-M=library-dedup.txt \
-VALIDATION_STRINGENCY=SILENT
-```
-
-### 5) add read group tags to BAM files using [picard](https://broadinstitute.github.io/picard/)
-
-```bash
-java -jar -Xmx10g scripts/picard-tools-1.109/AddOrReplaceReadGroups.jar \
-INPUT=librtary-dedup.bam \
-OUTPUT=library-dedup_rg.bam \
-SORT_ORDER=coordinate \
-RGID=library \
-RGLB=library \
-RGPL=illumina \
-RGSM=sample \
-RGPU=library \
-CREATE_INDEX=true \
-VALIDATION_STRINGENCY=SILENT
-```
-
-### 6) generate target list of InDel positions using [GATK](https://software.broadinstitute.org/gatk/)
-
-```bash
-mkdir $out/mapping/realign_list
-
-java -jar scripts/GenomeAnalysisTK-3.4-46/GenomeAnalysisTK.jar \
--T RealignerTargetCreator \
--R reference.fa \
--I library-dedup_rg.bam \
--o library-dedup_rg.list
-```
-
-### 7) re-align around InDels using [GATK](https://software.broadinstitute.org/gatk/)
-
-```bash
-java -Xmx20g -jar scripts/GenomeAnalysisTK-3.4-46/GenomeAnalysisTK.jar \
--T IndelRealigner \
--R reference.fa \
--I library-dedup_rg.bam \
--targetIntervals library-dedup_rg.list \
--o library-dedup_rg_InDel.bam
-```
-
-## B) Decontamination of libraries with *D. simulans* contamination
-
-### 1) obtain *D. simulans* genome
-
-```bash
-wget -O reference/sim_genome.fa http://datadryad.org/bitstream/handle/10255/dryad.62629/dsim-all-chromosome-M252_draft_4-chrnamesok.fa?sequence=1
-```
-
-
-### 2) add *"sim_"* to FASTA headers
-
-```bash
-sed 's/>/>sim_/g' reference/sim_genome.fa | gzip -c > reference/sim_genome_prefix.fa.gz
-```
-
-### 3) combine with *D. melanogaster* reference
-
-```bash
-zcat reference/sim_genome_prefix.fa.gz | cat reference.fa - | gzip -c > reference/combined.fa.gz
-```
-
-### 4) extract high confidence mapped reads from BAM file with [bam2fastq](https://github.com/jts/bam2fastq)
-
-```bash
-export PATH=$PATH:scripts/bam2fastq-1.1.0
-
-bam2fastq -s -o reads/library# library-dedup_rg_InDel.bam
-```
-
-### 5) competitive mapping of extracted reads against combined reference genomes
-
-```bash
-export PATH=$PATH:scripts/bwa-0.7.15
-
-bwa mem -Mt 20 reference/combined.fa.gz reads/library\_1.gz reads/library\_2.gz > library_deSim.sam
-```
-
-### 6) deconvolute the reads in the original BAM file
-
-```bash
-python2.7 scripts/FixBAM.py \
---contaminated library-dedup_rg_InDel.bam \
---prefix sim_ \
---detect library_deSim.sam \
---output library_deSim
-```
-
-## C) Merging BAM files and joint SNP calling
-
-### 1) merge BAM files (in the order of the file paths in BAMlist.txt) in a MPILEUP file only retaining nucleotides with BQ >20 and reads with MQ > 20
-
-```bash
-export PATH=$PATH:scripts/samtools-0.1.19
-
-samtools mpileup -B \
--f reference.fa \
--b BAMlist.txt \
--q 20 \
--Q 20 \
-| gzip > DrosEU.mpileup.gz
-```
-
-### 2) call SNPs with [PoolSNP](https://github.com/capoony/PoolSNP)
-
-See [documentation](https://github.com/capoony/PoolSNP/blob/master/README.md) of PoolSNP for further details
-
-```bash
-bash scripts/PoolSNP/PoolSNP.sh \
-mpileup=DrosEU.mpileup.gz \
-reference=reference.fa.gz \
-names=1_Mauternbach,2_Mauternbach,3_Yesiloz,4_Yesiloz,5_Viltain,7_Viltain,8_Gotheron,9_Sheffield,10_SouthQueensferry,11_Nicosia,12_MarketHarborough,13_Lutterworth,14_Broggingen,15_Broggingen,16_Yalta,18_Yalta,19_Odessa,20_Odessa,21_Odessa,22_Odessa,23_Kyiv,24_Kyiv,25_Varva,26_Piryuatin,27_Drogobych,28_Chernobyl,29_ChernobylYaniv,30_Lund,31_Munich,32_Munich,33_Recarei,34_Lleida,35_Lleida,36_Akaa,37_Akaa,38_Vesanto,39_Karensminde,41_Karensminde,42_ChaletAGobet,43_ChaletAGobet,44_Seeboden,45_Kharkiv,46_Kharkiv,47_ChernobylApple,48_ChernobylPolisske,49_Kyiv,50_Uman,51_Valday,BA_2012_FAT,BA_2012_SPT,FL_sample1,FL_sample2,GA,MA_2012_FAT,MA_2012_SPT,ME_sample1,ME_sample2,NC,NY_2012_FAT,NY_2012_SPT,PA_07_2009,PA_07_2010,PA_07_2011,PA_09_2011,PA_10_2011,PA_11_2009,PA_11_2010,PA_11_2011,PA_2012_FAT,PA_2012_SPT,SC,test,VA_2012_FAT,VA_2012_SPT,VI_2012_FAT,VI_2012_SPT,WI_09_2012,WI_2012_FAT,WI_2012_SPT \
-max-cov=0.99 \
-min-cov=10 \
-min-count=10 \
-min-freq=0.001 \
-miss-frac=0.2 \
-jobs=24 \
-BS=1 \
-output=SNPs
-```
-
-### 3) identify sites in proximity of InDels with a minimum count of 20 across all samples pooled and mask sites 5bp up- and downstream of InDel.
-
-```bash
-python scripts/DetectIndels.py \
---mpileup DrosEU.mpileup.gz \
---minimum-count 20 \
---mask 5 \
-| gzip > InDel-positions_20.txt.gz
-```
-
-### 4) use [Repeatmasker](http://www.repeatmasker.org/) to generate a GFF with location of known TE's
-
-#### obtain TE libraries
-
-```bash
-curl -O ftp://ftp.flybase.net/genomes/Drosophila_melanogaster//dmel_r6.10_FB2016_02/fasta/dmel-all-transposon-r6.10.fasta.gz
-curl -O ftp://ftp.flybase.net/genomes/Drosophila_melanogaster//dmel_r6.10_FB2016_02/fasta/dmel-all-chromosome-r6.10.fasta.gz
-```
-
-#### only keep contig name in headers (no spaces)
-
-```bash
-python2.7  scripts/adjust-id.py \
-dmel-all-transposon-r6.10.fasta \
-> dmel-all-transposon-r6.10_fixed-id.fasta
-```
-
-#### repeat mask *D. melanogaster* genome using [Repeatmasker](http://www.repeatmasker.org/)
-
-```bash
-scripts/RepeatMasker \
--pa 20 \
---lib dmel-all-transposon-r6.10_fixed-id.fasta \
---gff \
---qq \
---no_is \
---nolow \
-dmel-all-chromosome-r6.10.fasta
-```
-
-### 5) filter SNPs around InDels and in TE's from the original VCF produced with PoolSNP
-
-```bash
-python2.7 scripts/FilterPosFromVCF.py \
---indel InDel-positions_20.txt.gz \
---te dmel-all-chromosome-r6.10.fasta.out.gff \
---vcf SNPs.vcf.gz \
-| gzip > SNPs_clean.vcf.gz
-```
-
-## 6) annotate SNPs with [snpEff](http://snpeff.sourceforge.net/)
-
-```bash
-java -Xmx4g -jar scripts/snpEff-4.2/snpEff.jar \
--ud 2000 \
-BDGP6.82 \
--stats  SNPs_clean.html \
-SNPs_clean.vcf.gz \
-| gzip > SNPs_clean-ann.vcf.gz
-```
-
-## D) Calculation of unbiased population genetics estimators Tajima's *pi*, Watterson's *Theta* and Tajima's *D*
-
-### 1) convert the VCF to SYNC file format (see Kofler et al. 2011)
-
-```bash
-python scripts/VCF2sync.py \
---vcf SNPs_clean-ann.vcf.gz \
-| gzip > SNPs.sync.gz
-```
-
-### 2) resample SNPS to a 40x coverage
-
-```bash
-python scripts/SubsampleSync.py \
---sync SNPs.sync.gz \
---target-cov 40 \
---min-cov 10 \
-| gzip > SNPs-40x.sync.gz
-```
-
-### 3) Calculate "true" window-sizes (e.g. for non-overlapping 200kb windows) based on the number of sites that passed the coverage criteria (as calculated from [PoolSNP](https://github.com/capoony/PoolSNP)) are not located within TE's and that are not located close to InDels; See Material and Methods in [Kapun *et al.* (2020)](https://academic.oup.com/mbe/article/37/9/2661/5837682)
-
-```bash
-python scripts/TrueWindows.py \
---badcov SNP_BS.txt.gz \
---indel InDel-positions_20.txt.gz \
---te te.gff \
---window 200000 \
---step 200000 \
---output truewindows
-```
-
-### 4) Calculate window-wise Population Genetics parameters Tajima's *pi*, Watterson's *Theta* and Tajima's *D* using Pool-Seq corrections following Kofler *et al.* (2011)
-
-```bash
-python scripts/PoolGen_var.py \
---input SNPs-40x.sync.gz \
---pool-size 80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,66,80,80,80,80,80,80,80,80,70,80,80,80 \
---min-count 2 \
---window 200000 \
---step 200000 \
---sitecount truewindows-200000-200000.txt \
---min-sites-frac 0.75 \
---output Popgen
-```
-
-## E) Inference of Demographic patterns
-
-### 1) isolate SNPs located in Introns < 60 bp length using the *D. melanogaster* genome annotation in GFF file format and retain only SNPS with a minimum recombination rate >3 (based on Comeron et al. 2012) and in a minimum Distance of 1 mb to the breakpoints of common chromosomal inversions (based on Corbett-Detig et al. 2014).
-
-```bash
-# identify SNPs inside introns of < 60bp length
-
-python scripts/IntronicSnps.py \
---gff dmel-all-filtered-r6.09.gff.gz \
---sync SNPs.sync.gz \
---target-length 60 \
-> intron60_all.sync
-
-# remove SNPs within and in 1mb distance to chromosomal inversions and with recombination rates <3
-
-python scripts/FilterByRecomRateNInversion.py \
---inv data/inversions_breakpoints_v5v6.txt \
---RecRates data/DrosEU-SNPs.recomb.gz \
---input intron60_all.sync \
---D 1000000 \
---r 3 \
-> intron60.sync
-```
-
-### 2) calculate pairwise *F*<sub>ST</sub> based on the method of Weir & Cockerham (1984)
-
-```bash
-python scripts/FST.py \
---pool-size 80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,80,66,80,80,80,80,80,80,80,80,70,80,80,80 \
---input intron60.sync \
---minimum-count 2 \
---minimum-cov 10 \
-| gzip > intron.fst.gz
-```
-
-### 3) average *F*<sub>ST</sub> across all loci
-
-```bash
-python scripts/CombineFST.py \
---diff intron.fst.gz \
---stat 0 \
-> intron_average.fst
-```
-
-### 4) calculate isolation by distance (IBD)
-
-```bash
-python scripts/IBD.py \
---fst intron_average.fst \
---meta data/MetaData.txt \
---output IBD_EU
-```
-
-### 5) calculate allele frequencies of the major allele
-
-```bash
-python scripts/sync2AF.py \
---inp intron60.sync \
---out intron60-af
-```
-
-### 6) calculate PCA in *R*
-
+## B) download worldclim climate data
 ```R
-library(gtools)
-library(LEA)
-
-# load data
-meta=read.table("data/MetaData.txt",header=T)
-freq=read.table("intron60-af_freq.txt",header=F)
-rown<-meta[,1]
-rownames(freq)<-rown
-
-# calculate PCA
-write.lfmm(freq,"test.lfmm")
-pc=pca("test.lfmm")
-tw=tracy.widom(pc)
-a=stars.pval(tw$pvalues)
-
-# identify optimal number of clusters
-d=data.frame(pc$eigenvectors[,1:4)
-library(mclust)
-d_clust=Mclust(as.matrix(d), G=1:4)
-m.best <- dim(d_clust$z)[2]
-
-# identify cluster with K-means clustering
-comp <- data.frame(pc$eigenvectors[,1:4])
-k <- kmeans(comp, 5, nstart=25, iter.max=1000)
-library(RColorBrewer)
-library(scales)
-palette(alpha(brewer.pal(9,"Set1"), 0.5))
-
-# plot first two axes
-pdf("PCA.pdf",width=14,height=10)
-layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE),widths=c(1,1), heights=c(1.5,1))
-par(cex=1.5,mar=c(4,4,2,2))
-plot(-1*comp[,1],comp[,2], col=k$clust, pch=16,cex=1.5,xlab="PC1",ylab="PC2")
-names=c("Austria","Austria","Turkey","Turkey","France","France","France","UK","UK","Cyprus","UK","UK","Germany","Germany","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Sweden","Germany","Germany","Portugal","Spain","Spain","Finland","Finland","Finland","Denmark","Denmark","Switzerland","Switzerland","Austria","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Ukraine","Russia")
-
-text( -1*comp[,1],comp[,2],names, pos= 3,cex=0.75,pch=19)
-barplot(pc$eigenvalues[,1],ylab="Eigenvalues",names.arg=1:nrow(pc$eigenvalues),xlab="Principal components")
-abline(h=1,col="red",lwd=2,lty=2)
-b=barplot(cumsum(tw$percentage),ylim=c(0,1),names.arg =1:length(tw$percentage),ylab="variance explained",xlab="Principal components")
-abline(h=0.8,col="blue",lwd=2,lty=2)
-dev.off()
-
-# write PCA scores of first 3 axes to text file
-write.table(cbind(k$cluster,comp[,1],comp[,2],comp[,3]),file="PCA-scores.txt",row.names = T, quote=F)
-```
-
-### analyse population structure and admixture with the *R* package *conStruct*
-
-```R
-# install.packages("conStruct")
-library(conStruct)
-
-# Load allele frequencies, coordinates of each sampling site and geographic distances in kilometers
-Freq=read.table("intron60-af_freq.txt",header=F)
-CoordRaw=read.table("data/DrosEU-coord.txt",header=T)
-Coord=as.matrix(CoordRaw[,4:3])
-colnames(Coord)=c("Lon","Lat")
-DistRaw=read.table("data/DrosEU-geo.dist",header=T)
-Dist=as.matrix(DistRaw)
-
-# Set working directory
-setwd("/Volumes/MartinResearch2/new2014Analyses/analyses/4fold/construct")
-
-# test values of K ranging from 1 to 10 in 8-fold replication with cross-validation
-my.xvals <- x.validation(train.prop = 0.9,
-    n.reps = 8,
-    K = 1:10,
-    freqs = as.matrix(Freq),
-    data.partitions = NULL,
-    geoDist = Dist,
-    coords = Coord,
-    prefix = "example2",
-    n.iter = 1e3,
-    make.figs = T,
-    save.files = T,
-    parallel = TRUE,
-    n.nodes = 20)
-
-# load both the results for the spatial and non-spation models
-sp.results <- as.matrix(
-    read.table("example2_sp_xval_results.txt",
-    header = TRUE,
-    stringsAsFactors = FALSE))
-nsp.results <- as.matrix(
-    read.table("example2_nsp_xval_results.txt",
-    header = TRUE,
-    stringsAsFactors = FALSE))
-
-# format results from the output list
-sp.results <- Reduce("cbind",lapply(my.xvals,function(x){unlist(x$sp)}),init=NULL)
-nsp.results <- Reduce("cbind",lapply(my.xvals,function(x){unlist(x$nsp)}),init=NULL)
-sp.CIs <- apply(sp.results,1,function(x){mean(x) + c(-1.96,1.96) * sd(x)/length(x)})
-nsp.CIs <- apply(nsp.results,1,function(x){mean(x) + c(-1.96,1.96) * sd(x)/length(x)})
-
-# then, plot cross-validation results for K=1:10 with 8 replicates and visualize results with confidence interval bars
-pdf("cross-validate-sp.pdf",width=4,height=12)
-plot(rowMeans(sp.results),
-pch=19,col="blue",
-ylab="predictive accuracy",xlab="values of K",
-ylim=range(sp.CIs),
-main="spatial cross-validation results")
-segments(x0 = 1:nrow(sp.results),
-y0 = sp.CIs[1,],
-x1 = 1:nrow(sp.results),
-y1 = sp.CIs[2,],
-col = "blue",lwd=2)
-dev.off()
-
-# plot all Admixture plots for values of K ranging from 1:10
-for (i in seq(1,10,1)){
-      my.run <- conStruct(spatial = TRUE,
-            K = i,
-            freqs = as.matrix(Freq),
-            geoDist = Dist,
-            coords = Coord,
-            prefix = paste("test_",i,seq=""),
-            n.chains = 1,
-            n.iter = 1e3,
-            make.figs = T,
-            save.files = T)
-
-      admix.props <- my.run$chain_1$MAP$admix.proportions
-      pdf(paste("STRUCTURE_",i,"_1.pdf"),width=8,height=4)
-      make.structure.plot(admix.proportions = admix.props,
-            sample.names=CoordRaw$node_label,
-            mar = c(6,4,2,2),
-            sort.by=1)
-      dev.off()
-
-      # plot map with pie-charts showing proportion admixture  
-      pdf(paste("AdmPIE_",i,"_1.pdf"),width=9,height=8)
-      maps::map(xlim = range(Coord[,1]) + c(-5,5), ylim = range(Coord[,2])+c(-2,2), col="gray")
-      make.admix.pie.plot(admix.proportions = admix.props,
-            coords = Coord,
-            add = TRUE)
-      box()
-      axis(1)
-      axis(2)
-      dev.off()
-}
-```
-
-## F) Correlation with climatic variation using the WorldClim dataset (Hijmans *et al.* 2005)
-
-### 1) obtain climatic data
-
-```R
-# load raster package
+####get climate data from worldclim
 library(raster)
+library(sp)
 
-# first load WC bio variables at the resolution of 2.5 deg
-biod <- getData("worldclim", var="bio", res=2.5)
+###get annual temperature and precipitation
+r <- getData("worldclim",var="bio",res=10)
+r <- r[[c(1,12)]]
+names(r) <- c("Temp","Prec")
 
-# read csv file with geographic coordinates
-geod<-read.table("data/DrosEU-coord.txt", header=T)
+#load geographic cooridantes
+xy=read.csv('DrosEUmetadata.csv',sep=',',header = T)
+lats <- xy$lat
+lons <- xy$long
+coords <- data.frame(x=lons,y=lats)
 
-# extact for each coordinate bio clim variables
-bio<-extract(biod, geod[,c(4,3)])
+points <- SpatialPoints(coords, proj4string = r@crs)
+values <- extract(r,points)
+df <- cbind.data.frame(xy,values)
+df
 
-# create a full dataset
-bio.data<-cbind(geod,bio)
+###get tmean data, monthly average temperature
+t <- getData("worldclim",var="tmean",res=10)
+points <- SpatialPoints(coords, proj4string = t@crs)
+values <- extract(t,points)
 
-# save into external file
-write.table(bio.data,file="data/climate.txt",sep="\t", row.names=FALSE ,quote=FALSE)
+month=c(7,10,8,7,8,9,10,7,8,7,8,10,10,6,10,6,7,8,7,7,8,10,8,9,8,8,8,9,9,7,6,9,9,10,8,7,8,7,9,9,11,7,10,8,7,9,9,9,10,10)
+
+temp=c()
+for (i in 1:nrow(values)) {
+  temp=c(temp,as.vector(values[i,m[i]]))
+}
+temp # average monthly mean temperature (?C * 10)
+
+
+p <- getData("worldclim",var="prec",res=10)
+points <- SpatialPoints(coords, proj4string = p@crs)
+values <- extract(p,points)
+prec=c()
+for (i in 1:nrow(values)) {
+  prec=c(prec,as.vector(values[i,m[i]]))
+}
+prec # average monthly precipitation (mm)
 ```
-### 2) calculate PCA
 
+## C) RDA analysis
 ```R
-#read csv file with geographic coordinates
-geod<-read.table("data/climate.txt", header=T)
+library(adespatial)
+library(vegan)
 
-# get variance and mean for PCA
-library(FactoMineR)
+#load meta table
+meta<-read.csv("DrosEUmetadata.csv",header=T)
+meta<-meta[order(meta$Sample),]
+row.names(meta)<-c(1:length(meta[[1]]))
 
-# prepare dataset
-geo<-geod[,5:nrow(geod)]
-rownames(geo)<-geod[,2]
+#exclude samples have no host genetic differentiation info
+meta[c(-9,-35,-47),]->meta
 
-# do PCA
-pca<-PCA(geo)
 
-# make Figures
-pdf("data/climate_scree.pdf",width=6,height=6)
-layout(matrix(c(1,1,2,3), 2, 2, byrow = TRUE),widths=c(2,3), heights=c(1.5,1))
-plot(pca)
-barplot(pca$eig[,1],ylab="Eigenvalues",names.arg=1:nrow(pca$eig),xlab="Principal components")
-abline(h=1,col="blue")
-barplot(pca$eig[,3],names.arg=1:nrow(pca$eig),ylab="variance explained",xlab="Principal components")
-abline(h=80,col="blue")
+######load and prepare OTU table (output from mothur analysis)
+#100% OTU
+shared100<-read.table("start.droseu.unique.subsample.shared",header=T)
+shared100=shared100[,-1]
+shared100=shared100[,-2]
+shared100=data.frame(shared100[,-1],row.names = as.vector(shared100[,1]))
+#plot columnsums
+colSums(shared100)[1:100]
+#take OTUs with at least 1000 reads
+shared100EU<-shared100[,colSums(shared100[1:length(shared100)])>1000]
+
+#remove samples for which there is no allel frequecy info
+shared100EU[c(-9,-35,-47),]->shared100EU
+
+# Hellinger transform the species table
+shared100EU.h <- decostand (shared100EU, "hellinger")
+
+
+########### dbMEM analysis of autocorrelation
+#follow the protocol 
+#Borcard D., Gillet F. & Legendre P. Numerical Ecology with R, 2018
+#chapter 7
+library(SoDA)
+droseu.xy=geoXY(meta$lat,meta$long)
+droseu.xy=as.data.frame(droseu.xy,row.names = rownames(shared100EU.h))
+
+#Is there a linear trend in the data?
+anova(rda(shared100EU.h, droseu.xy))	# yes
+# Computation of linearly detrended data
+shared100EU.h.det <- resid(lm(as.matrix(shared100EU.h) ~ ., data = droseu.xy))
+## Step 1. Construct the matrix of dbMEM variables
+dbmem.tmp <- dbmem(droseu.xy, silent = FALSE)
+dbmem <- as.data.frame(dbmem.tmp)
+# Truncation distance used above:
+(thr <- give.thresh(dist(droseu.xy)))
+
+# Display and count the eigenvalues
+attributes(dbmem.tmp)$values
+length(attributes(dbmem.tmp)$values)
+# Argument silent = FALSE allows the function to display 
+# the truncation level.
+
+## Step 2. Run the global dbMEM analysis on the *detrended*
+##    Hellinger-transformed  data
+dbmem.rda <- rda(shared100EU.h.det ~ ., dbmem)
+anova(dbmem.rda)
+#not significant globally
+
+
+#########rda analysis######
+##   at 100% OTU level 
+#full model
+Mfull.rda=rda(shared100EU.h~AF.PC1+AF.PC2+AF.PC3+tempmonth+precmonth+Precyear+Tempyear+substrate,data=meta)
+#null model
+M1000.rda<-rda(shared100EU.h~1,data=meta)
+
+#run a global test first
+anova(Mfull.rda, permutations = how(nperm = 999))  #0.001
+anova(Mfull.rda, permutations = how(nperm = 999),by = "axis")   #3
+
+#model selection
+Mordi <- ordistep(M1000.rda, scope=formula(Mfull.rda), direction="forward",permutations = how(nperm = 999))
+# AF.PC1 + substrate + AF.PC2 + Tempyear+ (tempmonth) were selected
+
+#followed by backward selection
+ordistep(Mordi,scope=formula(M1000.rda),perm.max=1000,direction="backward") # no change
+
+#sense the model
+extractAIC(Mordi) #12.00000 -19.90485
+RsquareAdj(Mordi) #0.3623468  0.1771852
+
+#examine VIF
+vif.cca(Mordi)
+
+#####sense the model with or without axes of host genetic differentiation
+####Table S3
+#best model from ordistep() but without axes of host genetic differentiation
+Mordi.withoutAFPC1PC2 <- rda(shared100EU.h ~ substrate + Tempyear, data = meta)
+#add either PC1 or PC2 to the model abova
+Mordi.withoutAFPC2 <- rda(shared100EU.h ~ substrate + Tempyear + AF.PC1, data = meta)
+Mordi.withoutAFPC1 <- rda(shared100EU.h ~ substrate + Tempyear + AF.PC2, data = meta)
+#it is significantly different compared with a model without either PC1 or PC2
+anova(Mordi, Mordi.withoutAFPC2)    
+anova(Mordi, Mordi.withoutAFPC1)
+extractAIC(Mordi.withoutAFPC2)
+extractAIC(Mordi.withoutAFPC1)
+
+
+####Table S4
+#if we included latitude and longitude in the full model
+#PC1 and PC2 were still selected
+Mfull.rda=rda(shared100EU.h~AF.PC1+AF.PC2+AF.PC3+lat+long+tempmonth+precmonth+Precyear+Tempyear+substrate,data=meta)
+M1000.rda<-rda(shared100EU.h~1,data=meta)
+Mordi <- ordistep(M1000.rda, scope=formula(Mfull.rda), direction="forward",permutations = how(nperm = 999))
+#AF.PC1 + substrate + lat + AF.PC2 + long + Precyear 
+#it is significantly different compared with a model without PC1
+Mordi.withoutAFPC1=rda(shared100EU.h ~ substrate + lat + AF.PC2 + long + Precyear, data = meta)
+anova(Mordi, Mordi.withoutAFPC1) #0.001
+
+
+##
+#########rda analysis######  at family level  ##
+#Table S5
+#load tax.summary file from mothur analysis
+data5203=read.table(file="5135start.subsample.nr_v132.wang.tax.summary",header=T) 
+#pick taxlevel 5
+data5203[data5203$taxlevel==5,]->phyla5203
+#pick DrosEu samples
+droseu=c("taxlevel","rankID","taxon","daughterlevels","total","D1","D10","D11","D12","D13","D14","D15","D16","D18","D19","D2","D20","D21","D22","D23","D24","D25","D26","D27","D28","D29","D3","D30","D31","D32","D33","D34","D35","D36","D37","D38","D39","D4","D41","D42","D43","D44","D45","D46","D47","D48","D49","D5","D50","D7","D8","D9")
+dataeu=data5203[,droseu]
+phylaeu=phyla5203[,droseu]
+
+#prepare phyla table
+phylaeu2=phylaeu[,-c(1,2,4,5)]
+#take a look of sums
+plot(phylaeu$total)
+#take phyla with at least 1000 reads
+phylaeu2=phylaeu2[rowSums(phylaeu2[,-1])>1000,]
+rownames(phylaeu2)=phylaeu2$taxon
+phylaeu2=phylaeu2[,-1]
+phylaeu2=as.data.frame(t(phylaeu2))
+
+## Hellinger transform the species table
+phylaeu2.h <- decostand (phylaeu2, "hellinger")
+#null model 
+M1000.rda<-rda(phylaeu2.h~1,data=meta)
+#full model
+Mfull.rda=rda(phylaeu2.h~AF.PC1+AF.PC2+AF.PC3+tempmonth+precmonth+Precyear+Tempyear+substrate,data=meta)
+#run a global test first
+anova(Mfull.rda, permutations = how(nperm = 999)) #0.003
+
+#model seletion
+Mordi=ordistep(M1000.rda, scope=formula(Mfull.rda), direction="forward", permutations = how(nperm = 999))
+#Tempyear + AF.PC1 were selected
+
+#sense the model
+extractAIC(Mordi) #3.00000 -77.23731
+RsquareAdj(Mordi) #0.1466827  0.1078955
+
+```
+
+## D) R script for figure 1b and fig S3
+```R
+library(Imap)
+library(vegan)
+
+###read geographical matrix function
+#function to get geographical distances
+#from https://eurekastatistics.com/calculating-a-distance-matrix-for-geographic-points-using-r/
+ReplaceLowerOrUpperTriangle <- function(m, triangle.to.replace){
+  # If triangle.to.replace="lower", replaces the lower triangle of a square matrix with its upper triangle.
+  # If triangle.to.replace="upper", replaces the upper triangle of a square matrix with its lower triangle.
+  
+  if (nrow(m) != ncol(m)) stop("Supplied matrix must be square.")
+  if      (tolower(triangle.to.replace) == "lower") tri <- lower.tri(m)
+  else if (tolower(triangle.to.replace) == "upper") tri <- upper.tri(m)
+  else stop("triangle.to.replace must be set to 'lower' or 'upper'.")
+  m[tri] <- t(m)[tri]
+  return(m)
+}
+
+GeoDistanceInMetresMatrix <- function(df.geopoints){
+  # Returns a matrix (M) of distances between geographic points.
+  # M[i,j] = M[j,i] = Distance between (df.geopoints$lat[i], df.geopoints$lon[i]) and
+  # (df.geopoints$lat[j], df.geopoints$lon[j]).
+  # The row and column names are given by df.geopoints$name.
+    GeoDistanceInMetres <- function(g1, g2){
+    # Returns a vector of distances. (But if g1$index > g2$index, returns zero.)
+    # The 1st value in the returned vector is the distance between g1[[1]] and g2[[1]].
+    # The 2nd value in the returned vector is the distance between g1[[2]] and g2[[2]]. Etc.
+    # Each g1[[x]] or g2[[x]] must be a list with named elements "index", "lat" and "lon".
+    # E.g. g1 <- list(list("index"=1, "lat"=12.1, "lon"=10.1), list("index"=3, "lat"=12.1, "lon"=13.2))
+    DistM <- function(g1, g2){
+      require("Imap")
+      return(ifelse(g1$index > g2$index, 0, gdist(lat.1=g1$lat, lon.1=g1$lon, lat.2=g2$lat, lon.2=g2$lon, units="m")))
+    }
+    return(mapply(DistM, g1, g2))
+  }
+  
+  n.geopoints <- nrow(df.geopoints)
+    # The index column is used to ensure we only do calculations for the upper triangle of points
+  df.geopoints$index <- 1:n.geopoints
+    # Create a list of lists
+  list.geopoints <- by(df.geopoints[,c("index", "lat", "lon")], 1:n.geopoints, function(x){return(list(x))})
+    # Get a matrix of distances (in metres)
+  mat.distances <- ReplaceLowerOrUpperTriangle(outer(list.geopoints, list.geopoints, GeoDistanceInMetres), "lower")
+    # Set the row and column names
+  rownames(mat.distances) <- df.geopoints$name
+  colnames(mat.distances) <- df.geopoints$name
+    return(mat.distances)
+}
+###end of reading function 
+
+
+#load meta table for latitude,longitude info
+meta<-read.csv("DrosEUmetadata.csv",header=T)
+meta<-meta[order(meta$Sample),]
+row.names(meta)<-c(1:length(meta[[1]]))
+
+#calculate geographic distance
+df.cities <- data.frame(name =meta$Sample,  lat  = meta$lat, lon  = meta$long)
+geodist=GeoDistanceInMetresMatrix(df.cities) / 1000
+
+
+#load OTU table and calculate bray curtis matrix
+shared100<-read.table("start.droseu.unique.subsample.shared",header=T) #output from mothur analysis
+shared100=shared100[,-1]
+shared100=shared100[,-2]
+shared100=data.frame(shared100[,-1],row.names = as.vector(shared100[,1]))
+braymatrix=as.matrix(vegdist(shared100))
+
+#mantel test
+mantel(braymatrix,geodist,permutations=9999)$statistic
+mantel(braymatrix,geodist,permutations=9999)$signif
+
+
+##fig 1b
+library(ggplot2)
+x=as.vector(as.dist(geodist))
+y=as.vector(as.dist(braymatrix))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.35),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  labs(x = "geographic distance in km",y = "bacterial community dissimilarity")+
+  theme(axis.text=element_text(size=16,face="bold",colour = "black"),axis.title=element_text(size=17.5,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=2800, y=0.3, label="\nP = 0.0015\nr = 0.20\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1)
+
+##fig S3a
+#read pariwise fst table
+fst=read.csv("DrosEU-FST_Geo_update.csv",header = T)
+fst=fst[order(fst$Population1),]
+fst=fst[fst$Population1!='s51',]
+fst=fst[fst$Population2!='s51',]
+droplevels(fst)->fst
+fst.mat=as.matrix(xtabs(fst[, 3] ~ fst[, 2] + fst[, 1]))
+s1=c(0,rep(0,dim(fst.mat)[2]-1))
+names(s1)=colnames(fst.mat)
+as.dist(rbind(s1,fst.mat))
+
+#remove samples in meta table and shared file without fst infomation
+meta[c(-9,-35,-47),]->meta
+df.cities <- data.frame(name =meta$Sample,  lat  = meta$lat, lon  = meta$long)
+geodist=GeoDistanceInMetresMatrix(df.cities) / 1000
+shared100[c(-9,-35,-47),]->shared100
+braymatrix=as.matrix(vegdist(shared100))
+
+#do partial mantel test
+mantel.partial(as.dist(braymatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$statistic 
+#0.1855181
+mantel.partial(as.dist(braymatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$signif 
+#0.0211
+
+#plot fig S3a
+x=as.vector(as.dist(rbind(s1,fst.mat)))
+y=as.vector(resid(lm(as.vector(as.dist(braymatrix))~as.vector(as.dist(geodist)))))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.3),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  # labs(x = expression("pairwise F"[ST]),y = "residual community dissimilarity")+
+  labs(x ="pairwise Fst",y = "residual community dissimilarity")+
+  theme(axis.text=element_text(size=15,face="bold",colour = "black"),axis.title=element_text(size=16,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  # scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=0.0375, y=-0.4, label="\nP = 0.02\nr = 0.19\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1.25,col='black')
+
+
+######using different distance metrics for
+#fig S3bcde
+#jaccard index
+jmatrix=as.matrix(vegdist(shared100,method="jaccard"))
+mantel(jmatrix,geodist,permutations=9999)$statistic  #0.2040113
+mantel(jmatrix,geodist,permutations=9999)$signif #8e-04
+#partial mantel test
+mantel.partial(as.dist(jmatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$statistic #0.1895445
+mantel.partial(as.dist(jmatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$signif #0.0168
+
+#morisita-horn index
+hmatrix=as.matrix(vegdist(shared100,method="horn"))
+mantel(hmatrix,geodist,permutations=9999)$statistic  #0.1827412
+mantel(hmatrix,geodist,permutations=9999)$signif #0.001
+#partial mantel test
+mantel.partial(as.dist(hmatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$statistic #0.1622406
+mantel.partial(as.dist(hmatrix),as.dist(rbind(s1,fst.mat)),as.dist(geodist),permutations=9999)$signif #0.0267
+
+x=as.vector(as.dist(geodist))
+#figs3b
+png("fig.mantel.jaccard.png", width = 550, height = 500,res = 100)
+y=as.vector(as.dist(jmatrix))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.3),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  labs(title="jaccard",x = "geographic distance in km",y = "bacterial community dissimilarity")+
+  theme(plot.title = element_text(size=17.5,face="bold",colour = "black",hjust = 0.5),
+        axis.text=element_text(size=16,face="bold",colour = "black"),
+        axis.title=element_text(size=17.5,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=2800, y=0.3, label="\nP = 0.0008\nr = 0.20\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1.25,col='black')
 dev.off()
-
-# export loadings
-cat(capture.output(pca$var$coord),file="data/climate.rot",sep="")
-
-# export PC axes
-bio.data<-cbind(geod,pca$ind$coord)
-write.table(bio.data,file="data/climate_PCA.txt",sep="\t", row.names=FALSE ,quote=FALSE)
+#figure s3d
+png("fig.mantel.horn-morisita.png", width = 550, height = 500,res = 100)
+y=as.vector(as.dist(hmatrix))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.3),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  labs(title="horn-morisita",x = "geographic distance in km",y = "bacterial community dissimilarity")+
+  theme(plot.title = element_text(size=17.5,face="bold",colour = "black",hjust = 0.5),
+        axis.text=element_text(size=16,face="bold",colour = "black"),
+        axis.title=element_text(size=17.5,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=2800, y=0.3, label="\nP = 0.0010\nr = 0.18\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1.25,col='black')
+dev.off()
+#residual plot
+x=as.vector(as.dist(rbind(s1,fst.mat)))
+#figure s3c
+png("fig.mantel.jaccard.resid.png", width = 550, height = 500,res = 100)
+y=as.vector(resid(lm(as.vector(as.dist(jmatrix))~as.vector(as.dist(geodist)))))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.3),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  # labs(x = expression("pairwise F"[ST]),y = "residual community dissimilarity")+
+  labs(title="jaccard",x ="pairwise Fst",y = "residual community dissimilarity")+
+  theme(plot.title = element_text(size=17.5,face="bold",colour = "black",hjust = 0.5),
+        axis.text=element_text(size=15,face="bold",colour = "black"),
+        axis.title=element_text(size=16,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  # scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=0.0375, y=-0.4, label="\nP = 0.017\nr = 0.19\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1.25,col='black')
+dev.off()
+#figure s3e
+png("fig.mantel.horn-morisita.resid.png", width = 550, height = 500,res = 100)
+y=as.vector(resid(lm(as.vector(as.dist(hmatrix))~as.vector(as.dist(geodist)))))
+xy=as.data.frame(cbind(x,y))
+ggplot(xy, aes(x=x, y=y)) +
+  geom_point( shape=16,color=alpha('darkblue',0.3),cex=2.8)+
+  #geom_smooth(method=lm, se=FALSE,linetype="dashed",color="red",size=1)+
+  # labs(x = expression("pairwise F"[ST]),y = "residual community dissimilarity")+
+  labs(title="horn-morisita",x ="pairwise Fst",y = "residual community dissimilarity")+
+  theme(plot.title = element_text(size=17.5,face="bold",colour = "black",hjust = 0.5),
+        axis.text=element_text(size=15,face="bold",colour = "black"),
+        axis.title=element_text(size=16,face="bold"),
+        panel.border = element_rect(colour = "black", fill=NA, size=1),
+        panel.background = element_rect(fill = 'white', colour = 'red'),
+        panel.grid.major =element_line(colour = 'grey'))+
+  # scale_y_continuous(limits = c(0.2, 1))+
+  annotate(geom="text", x=0.0375, y=-0.5, label="\nP = 0.027\nr = 0.16\n",
+           color="black",size=6,fontface="bold")+
+  geom_smooth(method=lm,   # Add linear regression line
+              se=FALSE,size=1.25,col='black')
+dev.off()
 ```
-### 3) convert vcf file to bscan input files (python 2.7, requires PvVCF (https://pyvcf.readthedocs.io/en/latest/))
-```bash
-scripts/vcf2Bscan.py -filename SNPs.vcf.gz \
-	-qual 15 \
-	-depth 10 \
-	-task bscan \
-	-prefix bscan_2R \
-	-region 2R
-```
-
-### 4) run BayeScEnv
-```bash
-bayescenv SNPs.in \
-	-pilot 1000 \
-	-npb 5 \
-	-n 2000 \
-	-env env_var.txt \
-	-od ~/path/to/output/dir/
-```
-
-### 5) run GOwinda for top snps
-```bash
-gowinda --output-file pc1 \
-	--annotation-file dmel-all-r6.12.gtf \
-	--snp-file AllSNPS.vcf \
-	--candidate-snp-file topSNPs.bed \
-	--gene-set-file Dmel_funcassociate_go_associations.txt \
-	--simulations 1000000 \
-	--gene-definition updownstream2000 \
-	--threads 3
-```
-
-## G) Inversion frequencies and correlations with geographical variables
-
-### 1) obtain Marker-SNP positions in full SYNC dataset (see Kapun *et al.* 2014 for more details)
-
-```bash
-python3 scripts/OverlapSNPs.py \
---source data/inversion_markers_v6.txt_pos \
---target SNPs.sync.gz \
-> inversion_markers.sync
-```
-
-### 2) calculate inversion frequencies based on inversion-specific marker SNPs
-
-```bash
-python3 scripts/InvFreq.py \
---sync inversion_markers.sync \
---meta data/MetaData.txt \
---inv data/inversion_markers_v6.txt \
-> inversion.freq
-```
-
-### 3) test for correlations of inversion and TE frequencies with geographic variables and account for spatial autocorrelation
-
-```bash
-python3 scripts/Test4Correlation.py \
---meta data/MetaData.txt \
-> Correlation.test
-```
-
-## H) Selective sweeps
-
-### 1) Compute pileups from bam files
-
-```bash
-samtools mpileup \
-      -B \
-      -f holo_dmel_6.12.fa \
-      -q 20 \
-      -Q 20 \
-      $bamfile \
-      > $out/$name.mpileup
-```
-
-### 2) Separate pileup files by chromosome
-
-```awk
-awk '$1 == "2L" {print $0}' $name.pileup > $name-2L.pileup
-awk '$1 == "2R" {print $0}' $name.pileup > $name-2R.pileup
-awk '$1 == "3L" {print $0}' $name.pileup > $name-3L.pileup
-awk '$1 == "3R" {print $0}' $name.pileup > $name-3R.pileup
-awk '$1 == "4" {print $0}' $name.pileup > $name-4.pileup
-awk '$1 == "X" {print $0}' $name.pileup > $name-X.pileup
-```
-
-### 3) Run Pool-hmm for SFS (requires pool-hmm 1.4.4)
-
-```bash
-python pool-hmm.py \
-      --prefix $name-all \ # Name associated to each sample
-      -n 80 \ # Depending on the sample size
-      --only-spectrum \
-      --theta 0.005 \
-      -r 100
-```
-
-### 4) Run Pool-hmm for sweep detection (requires pool-hmm 1.4.4)
---pred: for prediction of selective window
-
--k 0.000000000000001: per site transition probability between hidden states (more restrictive as lower); this changed depending on the sample used
-
--s: spectrum file
-
--e: phred quality (required sanger for new illumina reads)
-
-outputs: $name.post, $name.pred, $name.segemit, $name.stat
-
-
-```bash
-python pool-hmm.py --prefix $name-2L -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-python pool-hmm.py --prefix $name-2R -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-python pool-hmm.py --prefix $name-3L -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-python pool-hmm.py --prefix $name-3R -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-python pool-hmm.py --prefix $name-4 -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-python pool-hmm.py --prefix $name-X -n 80 --pred -k 0.000000000000001 -s $name-all -e sanger
-```
-
-### 5) Transform Pool-hmm stat files into bed files (Python 2.7)
-
-```bash
-python read_stat_pool-hmm.py *.stat
-```
-
-### 6) Bedtools to get the genes inside our candidate selective sweeps (Bedtools v2.27.1)
-Concatenate all chromosome bed files for the same sample and run bedtools with Drosophila melanogaster v.6.12 annotation file
-
-```bash
-cat *.bed
-bedtools intersect -a dmel-all-r6.12_FlyBase_genes_nopseudo.bed -b sample.bed > sammple_flybase.txt
-```
-
-### 7) Look for genes overlapping among samples and populations
-all_sample_genes.txt contains a list of all genes obtained in all populations
-
-sampleXXX_genes.txt: genes found for each sample
-
-Overlap among samples; output is a: FBgn*_samples.txt; containing information of samples where the FBgnXXX gene was found
-
-```bash
-while read p; do
-      grep "$p" sampleXXX_genes.txt > "$p"_samples.txt
-      done <all_sample_genes.txt
-```
-
-Overlap among populations (Python 2.7)
-
-```bash
-python genes_per_population.py \
-      FBgn*_samples.txt
-```
-
-### 9) Calculate average Tajima's D in the 30 samples included for the analysis (Python 2.7)
-
-```bash
-python average_window_tajimasd.py
-```
-
 
 ## References
 
