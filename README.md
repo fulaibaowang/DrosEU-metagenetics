@@ -7,67 +7,81 @@ raw data: https://www.ncbi.nlm.nih.gov/biosample?LinkName=bioproject_biosample_a
 ## A) mothur script
 
 ```mothur
-#quality assessment and preparation of sequences
-make.contigs(file=stability2.csv, processors=12)
-summary.seqs(fasta=current)
-screen.seqs(fasta=current,group=current,summary=current,maxambig=0,maxlength=253,minlength=251)
-unique.seqs(fasta=current)
-count.seqs(name=current,group=current)
-#pcr.seqs(fasta=silva.bacteria.fasta, start=11894, end=25319, keepdots=F)
-#system(mv silva.bacteria.pcr.fasta silva.v4.fasta)
-align.seqs(fasta=stability2.trim.contigs.good.unique.fasta,reference=silva.v4.fasta)
-summary.seqs(fasta=current,count=current)
-screen.seqs(fasta=current,count=current,summary=current,start=1968,end=11550,maxhomop=8)
-filter.seqs(fasta=stability2.trim.contigs.good.unique.good.align,vertical=T,trump=.)
-unique.seqs(fasta=current,count=current)
-pre.cluster(fasta=current,count=current,diffs=2)
-chimera.uchime(fasta=current,count=current,dereplicate=t)
-remove.seqs(fasta=current,accnos=current)
-summary.seqs(fasta=current,count=current)
+####################mothur script######################
+#######quality assessment and preparation of sequences
+#pcr.seqs(fasta=silva.nr_v132.align, start=11894, end=25319, keepdots=F, processors=8)
+make.contigs(file=stability.rename.files, processors=8);
+summary.seqs(fasta=current);
+screen.seqs(fasta=current, group=current, maxambig=0, maxlength=275,processors=8);
+unique.seqs(fasta=stability.files.trim.contigs.good.fasta);
+count.seqs(name=stability.files.trim.contigs.good.names, group=stability.files.contigs.good.groups);
+align.seqs(fasta=current,reference=silva.nr_v132.pcr.align);
+summary.seqs(fasta=stability.files.trim.contigs.good.unique.align, count=current);
+screen.seqs(fasta=stability.files.trim.contigs.good.unique.align, count=current, summary=stability.files.trim.contigs.good.unique.summary, start=1968, end=11550, maxhomop=8);
+summary.seqs(fasta=current, count=current);
+filter.seqs(fasta=current,vertical=T,trump=.);
+unique.seqs(fasta=current,count=current);
+pre.cluster(fasta=current,count=current,diffs=2);
+chimera.uchime(fasta=current,count=current,dereplicate=t);
+remove.seqs(fasta=current,accnos=current);
+get.current();
 
-# for stack plot Figure 3
-classify.seqs(fasta=current, count=current, reference=silva.v4.fasta, taxonomy=silva.bacteria.silva.tax, cutoff=40,processors=16)
+# for stack plot Figure S1 and 
+# and calculate wolbachia percentage in Table 
+classify.seqs(fasta=current, count=current, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80,processors=8);
+remove.lineage(fasta=stability.files.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability.files.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.count_table, taxonomy=stability.files.trim.contigs.good.unique.good.filter.unique.precluster.pick.nr_v132.wang.taxonomy, taxon=Chloroplast-Mitochondria-unknown-Archaea-Eukaryota);
+classify.seqs(fasta=current, count=current, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80,processors=8)
+remove.lineage(fasta=current, count=current, taxonomy=current, taxon=Wolbachia);
+classify.seqs(fasta=current, count=current, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80);
 
-#for rarefaction curves Figure 2 
-remove.lineage(fasta=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.fasta, count=stability2.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.count_table, taxonomy=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.silva.wang.taxonomy, taxon=Wolbachia-Chloroplast-Mitochondria-unknown-Archaea-Eukaryota-Halomonas))
-#remove wolbachia & Halomonas
-cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, method=average, cutoff=0.15,processors=16)
-cluster(column=current,count=current)
-make.shared(list=current, count=current, label=0.03)
+######assign sequences to OTUs
+rename.file(fasta=current, count=current, taxonomy=current, prefix=start);
+cluster.split(fasta=start.fasta, count=start.count_table, taxonomy=start.taxonomy, splitmethod=classify, taxlevel=4,method=average, cutoff=0.15,processors=16)
+make.shared(list=start.an.unique_list.list, count=start.count_table, label=unique)
+rename.file(input=start.an.unique_list.unique.pick.shared,new=start.all.shared)
+count.groups(shared=start.all.shared)
+#get taxonomy for each otu
+classify.otu(list=start.an.unique_list.list, count=start.count_table, taxonomy=start.taxonomy, label=unique)
+#get representative sequence for each OTU
+get.oturep(list=start.an.unique_list.list, count=start.count_table,fasta=start.fasta,method=abundance,label=unique)
 
-count.groups(shared=current)
-#subsample 967 sequences
+###get DrosEu samples
+get.groups(shared=start.all.shared,groups=AT_Mau_14_01-UK_Sou_14_10-CY_Nic_14_11-UK_Mar_14_12-UK_Lut_14_13-DE_Bro_14_14-DE_Bro_14_15-UA_Yal_14_16-UA_Yal_14_17-UA_Yal_14_18-UA_Ode_14_19-AT_Mau_14_02-UA_Ode_14_20-UA_Ode_14_21-UA_Ode_14_22-UA_Kyi_14_23-UA_Kyi_14_24-UA_Var_14_25-UA_Pyr_14_26-UA_Dro_14_27-UA_Cho_14_28-UA_Cho_14_29-TR_Yes_14_03-SE_Lun_14_30-DE_Mun_14_31-DE_Mun_14_32-PT_Rec_14_33-ES_Gim_14_34-ES_Gim_14_35-FI_Aka_14_36-FI_Aka_14_37-FI_Ves_14_38-DK_Kar_14_39-TR_Yes_14_04-DK_Kar_14_40-DK_Kar_14_41-CH_Cha_14_42-CH_Cha_14_43-AT_See_14_44-UA_Kha_14_45-UA_Kha_14_46-UA_Cho_14_47-UA_Cho_14_48-UA_Kyi_14_49-FR_Vil_14_05-UA_Uma_14_50-FR_Vil_14_06-FR_Vil_14_07-FR_Got_14_08-UK_She_14_09)
+rename.file(input=start.all.unique.pick.shared,new=start.droseu.shared)
+count.groups(shared=start.droseu.shared)
+#subsample 5135 sequences
+sub.sample(shared=start.droseu.shared,size=5135,persample=true)
 
-##do simulations in R to get a new count_table flie including the simulated pools
-##new count_table flie - simulated.count_table
+#redo tax.summary file for analysis at family level (droseu)
+sub.sample(fasta=start.fasta, count=start.count_table,size=5135,persample=true)
+classify.seqs(fasta=current, count=current, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80);
+rename.file(fasta=start.subsample.fasta, count=start.subsample.count_table,prefix=5203)
+rename.file(input=start.subsample.nr_v132.wang.tax.summary,new=5203start.subsample.nr_v132.wang.tax.summary)
 
-sub.sample(fasta=current, count=simulated.count_table, taxonomy=current,size=967,persample=true)
-cluster.split(fasta=current, count=current, taxonomy=current, splitmethod=classify, taxlevel=4, method=average, cutoff=0.15)
-cluster(column=current,count=current)
-make.shared(list=current, count=current, label=0.03)
+###get fly versus substrate samples
+get.groups(shared=start.all.shared,groups=grape_A2_f-grape_A2_s-grape_A5_f-grape_A5_s-apple_A7_f-apple_A7_s-apple_A8_f-apple_A8_s-apple_B7_f-apple_B7_s-cherry_C7_f-cherry_C7_s-plum_D8_f-plum_D8_s-apple_a3_f-apple_a3_s-apple_a4_f-apple_a4_s-apple_Bars_s-apple_Bars_f-cactus_s-cactus_f-lemon_s-lemon_f)
+rename.file(input=start.all.unique.pick.shared,new=start.flysubs.shared)
+count.groups(shared=start.flysubs.shared)
+#sub sample 893 sequences
+sub.sample(shared=start.flysubs.shared,size=893,persample=true)
 
-rarefaction.single(shared=current, calc=sobs, freq=1)
-summary.single(shared=current, calc=nseqs-coverage-sobs-chao-shannon-simpson-shannoneven-simpsoneven)
+#redo tax.summary file for analysis at family level (substrate vs fly)
+sub.sample(fasta=start.fasta, count=start.count_table,size=893,persample=true)
+classify.seqs(fasta=current, count=current, reference=silva.nr_v132.pcr.align, taxonomy=silva.nr_v132.tax, cutoff=80);
+rename.file(fasta=start.subsample.fasta, count=start.subsample.count_table,prefix=893)
+rename.file(input=start.subsample.nr_v132.wang.tax.summary,new=893start.subsample.nr_v132.wang.tax.summary)
 
-#for pcoa plot and jitter plot and cluster analysis Figure 4, 5, and 6
-#Figure 4a, 5a, 6a, 6b we pick all individual samples and simulated pools from plum by using get.groups function
-get.groups(shared=current,fasta=current,count_table=current, groups=mel_home_plum_7_12_13-mel_home_plum_8_8_12-mel_home_plum_single10_7_12_13-mel_home_plum_single11_7_12_13-mel_home_plum_single12_7_12_13-mel_home_plum_single13_7_12_13-mel_home_plum_single14_7_12_13-mel_home_plum_single15_7_12_13-mel_home_plum_single16_7_12_13-mel_home_plum_single17_7_12_13-mel_home_plum_single18_7_12_13-mel_home_plum_single19_7_12_13-mel_home_plum_single1_7_12_13-mel_home_plum_single20_7_12_13-mel_home_plum_single21_7_12_13-mel_home_plum_single22_7_12_13-mel_home_plum_single23_7_12_13-mel_home_plum_single24_7_12_13-mel_home_plum_single25_7_12_13-mel_home_plum_single26_7_12_13-mel_home_plum_single27_7_12_13-mel_home_plum_single28_7_12_13-mel_home_plum_single29_7_12_13-mel_home_plum_single2_7_12_13-mel_home_plum_single30_7_12_13-mel_home_plum_single31_7_12_13-mel_home_plum_single32_7_12_13-mel_home_plum_single3_7_12_13-mel_home_plum_single4_7_12_13-mel_home_plum_single5_7_12_13-mel_home_plum_single7_7_12_13-mel_home_plum_single8_7_12_13-mel_home_plum_single9_7_12_13-simulated_pool1-simulated_pool2-simulated_pool3-simulated_pool4-simulated_pool5-simulated_pool6-simulated_pool7-simulated_pool8-simulated_pool9-simulated_pool10-simulated_pool11-simulated_pool12-simulated_pool13-simulated_pool14-simulated_pool15-simulated_pool16-simulated_pool17-simulated_pool18-simulated_pool19-simulated_pool20-simulated_pool21-simulated_pool22-simulated_pool23-simulated_pool24-simulated_pool25-simulated_pool26-simulated_pool27-simulated_pool28-simulated_pool29-simulated_pool30)
-dist.shared(shared=current, calc=braycurtis-jest,processors=8,label=0.03)
-pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.opti_mcc.braycurtis.0.03.lt.dist)
-pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.opti_mcc.jest.0.03.lt.dist)
-dist.seqs(fasta=current, output=lt, processors=8)
-clearcut(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.dist)
-unifrac.unweighted(tree=current, count=current, distance=lt, processors=8, random=F)
-unifrac.weighted(tree=current, count=current, distance=lt, processors=8, random=F)
-pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.tre1.unweighted.phylip.dist)
-pcoa(phylip=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.subsample.phylip.tre1.weighted.phylip.dist)
+###Alpha diversity analysis
+summary.single(shared=start.droseu.unique.subsample.shared, calc=nseqs-coverage-sobs-chao-shannon-simpson-invsimpson-shannoneven-simpsoneven)
 
-#Figure 4b, 5b we do the same except picking all pool samples across substrates and simulated pools from plum also by using get.groups function
-
-
-##get taxonomy for each otu
-get.oturep(list=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.opti_mcc.list,count=stability2.trim.contigs.good.unique.good.filter.unique.precluster.denovo.uchime.pick.pick.count_table,fasta=stability2.trim.contigs.good.unique.good.filter.unique.precluster.pick.pick.fasta,method=abundance,label=0.03)
-classify.seqs(fasta=current, count=current, reference=silva.v4.fasta, taxonomy=silva.bacteria.silva.tax, cutoff=40,processors=16)
+# assign OTU at 97% for comparing alpha diversity to previous study
+make.shared(list=start.an.unique_list.list, count=start.count_table, label=0.03)
+rename.file(input=start.an.unique_list.0.03.pick.shared,new=start.all.97.shared)
+count.groups(shared=start.all.97.shared)
+get.groups(shared=start.all.97.shared,groups=AT_Mau_14_01-UK_Sou_14_10-CY_Nic_14_11-UK_Mar_14_12-UK_Lut_14_13-DE_Bro_14_14-DE_Bro_14_15-UA_Yal_14_16-UA_Yal_14_17-UA_Yal_14_18-UA_Ode_14_19-AT_Mau_14_02-UA_Ode_14_20-UA_Ode_14_21-UA_Ode_14_22-UA_Kyi_14_23-UA_Kyi_14_24-UA_Var_14_25-UA_Pyr_14_26-UA_Dro_14_27-UA_Cho_14_28-UA_Cho_14_29-TR_Yes_14_03-SE_Lun_14_30-DE_Mun_14_31-DE_Mun_14_32-PT_Rec_14_33-ES_Gim_14_34-ES_Gim_14_35-FI_Aka_14_36-FI_Aka_14_37-FI_Ves_14_38-DK_Kar_14_39-TR_Yes_14_04-DK_Kar_14_40-DK_Kar_14_41-CH_Cha_14_42-CH_Cha_14_43-AT_See_14_44-UA_Kha_14_45-UA_Kha_14_46-UA_Cho_14_47-UA_Cho_14_48-UA_Kyi_14_49-FR_Vil_14_05-UA_Uma_14_50-FR_Vil_14_06-FR_Vil_14_07-FR_Got_14_08-UK_She_14_09)
+rename.file(input=start.all.97.0.03.pick.shared,new=start.droseu97.shared)
+sub.sample(shared=start.droseu97.shared,size=5135,persample=true)
+summary.single(shared=start.droseu97.0.03.subsample.shared, calc=nseqs-coverage-sobs-chao-shannon-simpson-invsimpson-shannoneven-simpsoneven)
 ```
 
 ### 2) map trimmed reads with [bwa](https://sourceforge.net/projects/bio-bwa/files/) and filter for propper read pairs with MQ > 20 using [samtools](http://samtools.sourceforge.net/)
