@@ -130,7 +130,7 @@ for (i in 1:nrow(values)) {
 prec # average monthly precipitation (mm)
 ```
 
-## C) RDA analysis
+## C) RDA & dbMEM analysis
 ```R
 library(adespatial)
 library(vegan)
