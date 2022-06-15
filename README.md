@@ -1,4 +1,4 @@
-# DrosEU-metagentics
+# DrosEU-metagenetics
 The bioinformatics pipeline for https://pubmed.ncbi.nlm.nih.gov/32003146/.
 Wang Y, Kapun M, Waidele L, Kuenzel S, Bergland AO, Staubach F. Common structuring principles of the Drosophila melanogaster microbiome on a continental scale and between host and substrate. Environ Microbiol Rep. 2020 Apr;12(2):220-228. doi: 10.1111/1758-2229.12826. Epub 2020 Feb 8. PMID: 32003146.
 
